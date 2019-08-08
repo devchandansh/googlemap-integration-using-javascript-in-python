@@ -1,0 +1,259 @@
+{% load static %}
+
+{% block pageContent %}
+<section class="body-section">
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-12">
+                <h1 class="">Google Map with Single Marker</h1>
+                <div class="map-outer-wrap">
+                    <div class="map-box">
+                        <div id="map"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock pageContent %}
+
+{% block pageFooter_cssScripts %}
+<style>
+.map-box{overflow: hidden;width: 100%;height: 380px;}
+#map { height: 100%; }
+html, body { height: 100%; margin: 0; padding: 0; }
+.marker_info textarea{border: 1px solid #00000038; resize: none;}
+</style>
+
+<script type="text/javascript">
+/* Get the JSON value of store locations as lat,lng */    
+var store_locations = JSON.parse('{{ store_locations|safe }}');
+
+/* Set Google API KEY */
+var GOOGLE_MAP_API_KEY = "{{ GOOGLE_MAP_API_KEY }}";
+
+var locations = store_locations;
+var marked_locations = {};
+
+
+/* Defined variables used in map */
+var map;
+var marker;
+var bounds;
+var geocoder;
+var infoWindow;
+var bindMarkerinfo;
+var bindMarkerEvents;
+var india = {lat: 20.5937, lng: 78.9629};
+
+function initialize_map() {
+    // Try HTML5 geolocation to get location
+    infoWindow  = new google.maps.InfoWindow();
+    geocoder    = new google.maps.Geocoder();
+    bounds      = new google.maps.LatLngBounds();
+    
+    // Display a map on the page
+    map = new google.maps.Map(document.getElementById('map'), {
+        center: india,
+        mapTypeId: 'roadmap',
+        zoom: 10,
+    });
+    
+    /**
+    * Creates an instance of google.maps.LatLng by given lat and lng values and returns it.
+    * This function can be useful for getting new coordinates quickly.
+    * @param {!number} lat Latitude.
+    * @param {!number} lng Longitude.
+    * @return {google.maps.LatLng} An instance of google.maps.LatLng object
+    */
+
+    var getLatLng = function(lat, lng) {
+        return new google.maps.LatLng(lat, lng);
+    };
+    
+    /**
+    * Executes when, Clicked on Marker.
+    * Bind Marker Information & Click Event on the Marker
+    **/
+    bindMarkerinfo = function(marker) {
+        new google.maps.event.addListener(marker, "click", function (point) {
+            infoWindow.open(marker.get('map'), marker);
+        });
+    };
+
+    /**
+    * Binds right click event to given marker and invokes a callback 
+    * function that will remove the marker from map.
+    * @param {!google.maps.Marker} marker A google.maps.Marker instance that the handler will binded.
+    **/
+    bindMarkerEvents_rightClick = function(marker) {
+        google.maps.event.addListener(marker, "rightclick", function (point) {
+        });
+    };
+
+    /**  
+    * Mark Previously Property Saved Location on maps.
+    * Fits all the markers to the map.
+    * @params {location list}
+    */   
+    if(Object.keys(locations).length){
+        var loc_position = getLatLng(locations.latitude, locations.longitude);
+        // Create market on th map: fron DB
+        create_marker(loc_position , true);
+    } 
+        
+    // For Zooming Options:
+    var fitToMarkers = function(map, markers, maxZoom) {
+        if (typeof maxZoom == 'undefined') maxZoom = 15;
+        google.maps.event.addListenerOnce(map, 'bounds_changed', function(event) {
+            if (this.getZoom() > maxZoom) {
+                this.setZoom(maxZoom);
+            }
+        });
+        map.fitBounds(bounds);
+    }
+    
+    // For Click Event on Marker:
+    map.addListener('click', function(event) {
+        var tmp_position = event.latLng;
+        var lat = tmp_position.lat();
+        var lng = tmp_position.lng();
+        
+        // Create Marker on the map
+        create_marker(tmp_position);
+    });    
+    
+} // End of Initialization
+
+/* Adds a marker to the map and push to the array. */
+function create_marker(geo_LatLng, pre_saved=false) {
+    
+    if (!marker) {
+        marker = new google.maps.Marker({
+            position: geo_LatLng,
+            map: map,
+        });
+
+        if(!pre_saved){
+            // Get the Geocodeing Address Components 
+            geocodeLatLng(marker);
+        }else{
+            infoWindow.setContent(locations.formatted_address);
+            infoWindow.open(marker.get(map), marker);
+        }
+
+        // Bind Click Event on Marker.
+        bindMarkerinfo(marker);
+        // Bind Right Click for Remove
+        bindMarkerEvents_rightClick(marker);
+    }else{
+        // Set new position to marker
+        marker.setPosition(geo_LatLng);
+
+        // Get the Geocodeing Address Components 
+        geocodeLatLng(marker);
+        // Bind Right Click for Remove
+        bindMarkerEvents_rightClick(marker);
+    }
+}
+
+/* Add Markers on the map as lat,lng data */
+function geocodeLatLng(marker_point) {
+    var lat = marker_point.getPosition().lat();
+    var lng = marker_point.getPosition().lng();
+    var marker_id = getMarkerUniqueId(lat, lng);
+
+    var latlng = { lat: parseFloat(lat), lng: parseFloat(lng)};
+
+    // Fresh Call:: Marker not Exists in Database:
+    geocoder.geocode({'location': latlng}, function(results, status) {
+        console.log(results);
+        if (status === 'OK') {
+            if (results[0]) {
+                var geo_result = results[0];
+                var geo_place_id            = geo_result.place_id;    
+                var geo_address_components  = geo_result.address_components;
+                var geo_formatted_address   = geo_result.formatted_address;    
+                
+                var temp_location = {};
+                var country = "";
+                var postal_code = "";
+                var locality = '';
+                var sublocality = '';
+                var administrative_area_level_1 = '';
+
+                for (var i = 0; i < geo_result.address_components.length; i++) {
+                    for (var j = 0; j < geo_result.address_components[i].types.length; j++) {
+                        // For Locality:
+                        if (geo_result.address_components[i].types[j] == "locality") {
+                            locality = geo_result.address_components[i].long_name;
+                        }
+                        // For Sub Locality:
+                        if (geo_result.address_components[i].types[j] == "sublocality") {
+                            sublocality = geo_result.address_components[i].long_name;
+                        }
+                        // For administrative_area_level_1:
+                        if (geo_result.address_components[i].types[j] == "administrative_area_level_1") {
+                            administrative_area_level_1 = geo_result.address_components[i].long_name;
+                        }
+                        
+                        // For Country:
+                        if (geo_result.address_components[i].types[j] == "country") {
+                            country = geo_result.address_components[i].long_name;
+                            country_short = geo_result.address_components[i].short_name;
+                        }
+                        // For Postal Code
+                        if (geo_result.address_components[i].types[j] == "postal_code") {
+                            postal_code = geo_result.address_components[i].long_name;
+                        }
+                    }
+                }
+                
+                // map.setCenter(geo_result.geometry.location);
+                
+                // marker_point.id = geo_place_id;
+                marked_locations[0] = {
+                    'lat': parseFloat(lat), 
+                    'lng': parseFloat(lng), 
+                    'place_id' : geo_place_id, 
+                    'formatted_address' : geo_formatted_address, 
+                    'locality' : locality,
+                    'sublocality' : sublocality,
+                    'administrative_area_level_1' : administrative_area_level_1,
+                    'country' : country,
+                    'country_short' : country_short,
+                    'postal_code' : postal_code,
+                };
+
+                // Set Info Window:
+                infoWindow.setContent(geo_result.formatted_address);
+                infoWindow.open(marker.get(map), marker_point);
+
+            }else{
+                console.log("No results found");
+            }
+        }else{
+            infoWindow.setContent("Google failed to get location");
+            console.log("Geocoder failed due to: "+ status);
+        }
+    });
+}
+
+
+/**
+* Concatenates given lat and lng with an underscore and returns it.
+* This id will be used as a key of marker to cache the marker in markers object.
+* @param {!number} lat Latitude.
+* @param {!number} lng Longitude.
+* @return {string} Concatenated marker id.
+*/
+var getMarkerUniqueId= function(lat, lng) {
+    return lat + '_' + lng;
+};
+//========== End Of Map Fnc: Initialization ==========
+
+</script>
+<script src="https://maps.googleapis.com/maps/api/js?region=SA&libraries=places&key={{ GOOGLE_MAP_API_KEY }}&callback=initialize_map"
+async defer></script>
+
+{% endblock pageFooter_cssScripts %}
